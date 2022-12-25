@@ -3,6 +3,9 @@ this javascript reads the data from a siemens td 3511 smart meter and decrypts i
 
 it takes up to a minute until the data can be read.
 
+## Hardware
+ELV Bausatz Lesekopf mit USB-Schnittstelle für digitale Zähler USB-IEC
+
 ## Install
 add your javascript instance two npm-moduels "serialport" and "aes-js"
 
