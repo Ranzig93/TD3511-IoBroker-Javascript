@@ -235,7 +235,7 @@ function getData(data,key,path){
     setState(path + '.3_7_0',Number(P_3_7_0));
     setState(path + '.4_7_0',Number(P_4_7_0));
     setState(path + '.1_128_0',Number(P_1_128_0));
-    setState(path + '.saldo',Number(P_1_7_0 - P_2_7_0));
+    setState(path + '.saldo',Number(P_2_7_0 - P_1_7_0));
 
 }
 
