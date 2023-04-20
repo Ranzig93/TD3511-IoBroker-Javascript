@@ -3,43 +3,20 @@ var { SerialPort } = require('serialport')
 
 var path = "0_userdata.0.td3511";
 var key_128 = "********************************";
-var usbPath = '/dev/ttyUSB0'; 
+var usbPath = '/dev/ttyUSB'; 
 const bySerial = true;
 const usbSerial = '86498b1fbceeec11950d30f90f611b40';
 
 //Create states
 createStates(path);
+//Timeout
+resetSerialPortTimeout();
 
-const port = new SerialPort({
-    path: usbPath,
-    baudRate: 9600,
-    dataBits: 8,
-    stopBits: 1,
-    parity: "even",
-    autoOpen: false
-})  
+//Create SerialPort
+var port = SerialPort;
+port = null;
+init();
 
-//Search USB port by serial 
-SerialPort.list().then(function(ports){
-    if (bySerial){
-        ports.forEach(function(port){
-            console.log(port);
-            if (port.serialNumber === usbSerial){
-                usbPath = port.path;
-                console.log(usbPath);
-            }
-        });
-        port.settings.path = usbPath;
-    }
-    port.open(function (err) {
-        if (err) {
-            console.log('Error opening port: ');
-            return console.log(err.message);
-        }else{
-            console.log('Open port succsess: ' + usbPath);
-        }
-    })
-});
 
 /*
 Telegram:
@@ -58,74 +35,114 @@ const ByteHeader = 0x68;
 const ByteAck = 0xe5;
 const ByteEnd = 0x16;
 
-var timeout;
+
+var timeoutErrorAck;
+var timeoutSerialPort;
 var bytes = [];
 var dataLenght = 0;
 var counter = 0;
 var error = false;
 var lastRead;
 
-// Switches the port into "flowing mode"
-port.on('data', function (data) {
-    lastRead = Date.now();
-    //Get bytes
-    for (const value of data.values()) {
-        if (error){break};
-        //Header
-        if (counter === 0 || counter === 3){ 
-            if (value === ByteHeader) {
-                counter++
-            } else {
-                console.log('error header byte');
-                error = true; 
-            };
-        }
-        //Length
-        else if (counter === 1 || counter === 2){ 
-            dataLenght = value;
-            counter++;
-        } 
-        //Data
-        else if (counter >= 4 && counter <= dataLenght + 3){
-            bytes.push(value);
-            counter++;
-        } 
-        //Checksum
-        else if (counter === (dataLenght + 4)){
-            var checksum = 0;
-            for (let i = 0; i < bytes.length; i++) {
-                checksum += bytes[i]
-            }
-            checksum = checksum & 0xFF;
-            if (checksum != value){
-                console.log('error checksum');
-                error = true;
-            }
-            counter++;
-        }
-        //End
-        else if (counter === (dataLenght + 5)){ 
-            if (value === ByteEnd) {
-                //Get Data
-                getData(bytes,key_128,path);
-                //Ack
-                ack();
-            } else {
-                console.log('error end byte');
-                error = true; 
-            };
-        }
-    }
 
-    if (error){
-        timeout = setTimeout(async function () {
-            if (Date.now() - lastRead > 99){
-                //Ack
-                ack();
+
+function init(){
+    port = new SerialPort({
+        path: usbPath,
+        baudRate: 9600,
+        dataBits: 8,
+        stopBits: 1,
+        parity: "even",
+        autoOpen: false
+    })  
+
+    //Search USB port by serial 
+    SerialPort.list().then(function(ports){
+        if (bySerial){
+            ports.forEach(function(port){
+                console.log(port);
+                if (port.serialNumber === usbSerial){
+                    usbPath = port.path;
+                    console.log(usbPath);
+                }
+            });
+            port.settings.path = usbPath;
+        }
+        port.open(function (err) {
+            if (err) {
+                console.log('Error opening port: ');
+                return console.log(err.message);
+            }else{
+                console.log('Open port succsess: ' + usbPath);
             }
-        }, 100);
-    }
-})
+        })
+    });
+
+    // Switches the port into "flowing mode"
+    port.on('data', function (data) {
+        lastRead = Date.now();
+        //Get bytes
+        for (const value of data.values()) {
+            if (error){break};
+            //Header
+            if (counter === 0 || counter === 3){ 
+                if (value === ByteHeader) {
+                    counter++
+                } else {
+                    console.log('error header byte');
+                    error = true; 
+                };
+            }
+            //Length
+            else if (counter === 1 || counter === 2){ 
+                dataLenght = value;
+                counter++;
+            } 
+            //Data
+            else if (counter >= 4 && counter <= dataLenght + 3){
+                bytes.push(value);
+                counter++;
+            } 
+            //Checksum
+            else if (counter === (dataLenght + 4)){
+                var checksum = 0;
+                for (let i = 0; i < bytes.length; i++) {
+                    checksum += bytes[i]
+                }
+                checksum = checksum & 0xFF;
+                if (checksum != value){
+                    console.log('error checksum');
+                    error = true;
+                }
+                counter++;
+            }
+            //End
+            else if (counter === (dataLenght + 5)){ 
+                if (value === ByteEnd) {
+                    //Get Data
+                    getData(bytes,key_128,path);
+                    //Ack
+                    ack();
+                    //Timeout
+                    resetSerialPortTimeout();
+                } else {
+                    console.log('error end byte');
+                    error = true; 
+                };
+            }
+        }
+
+        if (error){
+            timeoutErrorAck = setTimeout(async function () {
+                if (Date.now() - lastRead > 99){
+                    //Ack
+                    ack();
+                }
+            }, 100);
+        }
+    })
+}
+
 
 // close connection if script stopped
 onStop(function (callback) {
@@ -144,6 +161,20 @@ function ack(){
     dataLenght = 0;
     counter = 0;
     error = false;
+}
+
+function resetSerialPortTimeout(){
+    clearTimeout(timeoutSerialPort);
+    timeoutSerialPort = setTimeout(async function () {
+        console.log('No valid data, restart serial port');
+        //ClosePort
+        port.close(function (err) {
+            console.log('port closed', err);
+            //Creat new SerialPort
+            port = null;
+            init();
+        })
+    }, 240000);
 }
 
 //###############################################################################################
@@ -235,7 +266,8 @@ function getData(data,key,path){
     setState(path + '.3_7_0',Number(P_3_7_0));
     setState(path + '.4_7_0',Number(P_4_7_0));
     setState(path + '.1_128_0',Number(P_1_128_0));
-    setState(path + '.saldo',Number(P_2_7_0 - P_1_7_0));
+    setState(path + '.saldo',Number(P_1_7_0 - P_2_7_0));
+    setState(path + '.utclocal',Number(Date.now()));
 
 }
 
@@ -259,6 +291,12 @@ function createStates(id){
         type: 'number',
         role: 'state',
         name: 'utc',
+        unit: 'ms'
+    });
+    createState(id + '.utclocal', 0, {
+        type: 'number',
+        role: 'state',
+        name: 'utc locale',
         unit: 'ms'
     });
     createState(id + '.1_8_0', 0, {
